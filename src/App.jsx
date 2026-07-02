@@ -1357,6 +1357,17 @@ function normalizeSearchValue(value = "") {
     .toLowerCase();
 }
 
+function normalizeRoleValue(value = "") {
+  return normalizeSearchValue(value).replace(/[^a-z0-9]+/g, "");
+}
+
+function userHasRole(user, roleCode) {
+  const target = normalizeRoleValue(roleCode);
+  return [user.roleId, user.role, user.roleCode, user.title]
+    .filter(Boolean)
+    .some((value) => normalizeRoleValue(value).includes(target));
+}
+
 function uniqueTextOptions(rows, selector) {
   return Array.from(
     new Set(rows.map(selector).filter((value) => value && String(value).trim()))
@@ -1388,10 +1399,11 @@ function CustomSelect({ value, options, onChange, placeholder = "Chọn", classN
       const gap = 6;
       const preferredMaxHeight = 240;
       const optionHeight = Math.min(preferredMaxHeight, normalizedOptions.length * 44 + 12);
-      const menuWidth = isPermissionSelect ? Math.max(rect.width, 180) : rect.width;
-      const menuLeft = isPermissionSelect
-        ? Math.min(Math.max(8, rect.right - menuWidth), window.innerWidth - menuWidth - 8)
-        : rect.left;
+      const menuWidth = Math.min(
+        Math.max(rect.width, isPermissionSelect ? 180 : rect.width),
+        window.innerWidth - 16
+      );
+      const menuLeft = Math.min(Math.max(8, rect.left), window.innerWidth - menuWidth - 8);
       const spaceBelow = window.innerHeight - rect.bottom - gap;
       const spaceAbove = rect.top - gap;
       const placeAbove = spaceBelow < optionHeight && spaceAbove > spaceBelow;
@@ -1494,11 +1506,20 @@ function Sidebar({ screen, setScreen, previewPermissions, onLogout }) {
     ? systemSubItems.filter((item) => hasPreviewAccess(previewPermissions, previewNavModules[item.screen] || []))
     : systemSubItems;
   const systemScreens = ["system-users", "system-permissions", "channel-config", "approval-config", "sla-config"];
-  const [isSystemOpen, setIsSystemOpen] = useState(systemScreens.includes(screen));
+  const [isSystemOpen, setIsSystemOpen] = useState(() => {
+    if (systemScreens.includes(screen)) return true;
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("forecast-kd01-system-nav-open") === "1";
+  });
 
   useEffect(() => {
     if (systemScreens.includes(screen)) setIsSystemOpen(true);
   }, [screen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("forecast-kd01-system-nav-open", isSystemOpen ? "1" : "0");
+  }, [isSystemOpen]);
 
   return (
     <aside className="sidebar">
@@ -1775,6 +1796,7 @@ function ChartPanel({ forecast, tasks = [] }) {
 }
 
 function NoticePanel({ events = initialEvents }) {
+  const [page, setPage] = useState(1);
   const notices = events.length ? events : [
     {
       icon: Calendar,
@@ -1805,7 +1827,14 @@ function NoticePanel({ events = initialEvents }) {
       time: "Hôm qua",
     },
   ];
-  const visibleNotices = notices.slice(0, 20);
+  const pageSize = 20;
+  const totalPages = Math.max(1, Math.ceil(notices.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const visibleNotices = notices.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  useEffect(() => {
+    setPage(1);
+  }, [events.length]);
 
   return (
     <section className="panel notice-panel">
@@ -1828,6 +1857,10 @@ function NoticePanel({ events = initialEvents }) {
             </article>
           );
         })}
+      </div>
+      <div className="notice-footer">
+        <span>Hiển thị {visibleNotices.length ? `${(safePage - 1) * pageSize + 1}-${Math.min(safePage * pageSize, notices.length)}` : "0"} / {notices.length}</span>
+        <SimplePagination page={safePage} totalPages={totalPages} onPageChange={setPage} />
       </div>
     </section>
   );
@@ -3870,7 +3903,7 @@ function ChannelConfigModal({ channel, users, onClose, onSave }) {
     value: user.id,
     label: `${user.name}${user.title ? ` - ${user.title}` : ""}`,
   }));
-  const asmUsers = users.filter((user) => String(user.role || "").toLowerCase() === "asm");
+  const asmUsers = users.filter((user) => userHasRole(user, "asm"));
   const toggleAsm = (userId) => {
     setForm((current) => ({
       ...current,
@@ -4572,7 +4605,7 @@ function ForecastDetail({
   const doneCount = tasks.filter((task) => ["GĐKD đã duyệt", "Phát hành"].includes(task.status)).length;
   const waitingCount = tasks.filter((task) => ["Chờ RSM duyệt", "Chờ GĐKD duyệt"].includes(task.status)).length;
   const openCount = Math.max(0, tasks.length - doneCount - waitingCount);
-  const assignableUsers = users.filter((user) => String(user.role || "").toLowerCase() === "asm" && user.status === "Active");
+  const assignableUsers = users.filter((user) => userHasRole(user, "asm") && user.status === "Active");
   const normalizedTaskSearch = normalizeSearchValue(taskSearch.trim());
   const visibleTasks = tasks.filter((task) => {
     if (!normalizedTaskSearch) return true;
@@ -5051,7 +5084,7 @@ function toIdPart(value = "") {
 function buildFrameworkAsmCandidates(frameworkRows, users = []) {
   const tones = ["blue", "green", "purple", "slate"];
   const asmUsers = users.filter((user) =>
-    String(user.role || "").toLowerCase() === "asm" &&
+    userHasRole(user, "asm") &&
     String(user.status || "").toLowerCase() === "active"
   );
   if (asmUsers.length) {
