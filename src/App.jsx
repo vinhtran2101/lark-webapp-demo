@@ -1,19 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
   BarChart3,
-  Bell,
   Building2,
   Calendar,
   CalendarDays,
   Check,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
-  CircleHelp,
   Circle,
   ClipboardList,
   Clock3,
@@ -26,11 +22,8 @@ import {
   FolderOpen,
   Gauge,
   Globe2,
-  Grip,
-  HelpCircle,
   Info,
   LayoutDashboard,
-  LogOut,
   MoreVertical,
   Pencil,
   Plus,
@@ -51,7 +44,11 @@ import {
   Cloud,
   Lock,
 } from "lucide-react";
+import AppSidebar from "./components/layout/Sidebar";
+import Topbar from "./components/layout/Topbar";
+import CustomSelect from "./components/ui/CustomSelect";
 import { buildAppDataFromBootstrap, buildMockAppData } from "./data/mockViewModels";
+import { fetchAuthState, fetchBootstrapData, requestJson } from "./services/apiClient";
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, screen: "overview" },
@@ -488,39 +485,6 @@ function toDisplayDate(value) {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
-async function apiRequest(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.ok === false) {
-    throw new Error(payload.message || `request_failed_${response.status}`);
-  }
-  return payload;
-}
-
-async function fetchAuthState() {
-  const response = await fetch(`/api/auth/me?t=${Date.now()}`, {
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.ok === false) {
-    throw new Error(payload.message || `auth_${response.status}`);
-  }
-  return payload.auth || {
-    required: false,
-    configured: false,
-    authenticated: false,
-    mode: "mock",
-  };
-}
-
 function App() {
   const [screen, setScreen] = useState("overview");
   const [forecasts, setForecasts] = useState(initialForecasts);
@@ -579,16 +543,8 @@ function App() {
   };
 
   const loadDatabaseData = async ({ shouldApply = () => true } = {}) => {
-    const response = await fetch(`/api/data/bootstrap?t=${Date.now()}`, {
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    });
-    if (!response.ok) throw new Error(`bootstrap_${response.status}`);
-
-    const payload = await response.json();
-    if (!payload.ok) throw new Error(payload.message || "bootstrap_failed");
-
-    const nextData = buildAppDataFromBootstrap(payload.data, iconRegistry);
+    const bootstrapData = await fetchBootstrapData();
+    const nextData = buildAppDataFromBootstrap(bootstrapData, iconRegistry);
     if (!shouldApply()) return null;
 
     setForecasts(nextData.initialForecasts);
@@ -1024,7 +980,16 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar screen={screen} setScreen={setScreen} previewPermissions={effectivePermissions} onLogout={handleLogout} />
+      <AppSidebar
+        screen={screen}
+        setScreen={setScreen}
+        previewPermissions={effectivePermissions}
+        onLogout={handleLogout}
+        navItems={navItems}
+        systemSubItems={systemSubItems}
+        previewNavModules={previewNavModules}
+        hasPreviewAccess={hasPreviewAccess}
+      />
       <main className="main-shell">
         <Topbar
           title={headerTitle}
@@ -1344,10 +1309,6 @@ function AuthGate({ auth }) {
   );
 }
 
-function toSelectOption(option) {
-  return typeof option === "string" ? { value: option, label: option } : option;
-}
-
 function normalizeSearchValue(value = "") {
   return String(value)
     .normalize("NFD")
@@ -1371,279 +1332,6 @@ function userHasRole(user, roleCode) {
 function uniqueTextOptions(rows, selector) {
   return Array.from(
     new Set(rows.map(selector).filter((value) => value && String(value).trim()))
-  );
-}
-
-function CustomSelect({ value, options, onChange, placeholder = "Chọn", className = "", disabled = false }) {
-  const [open, setOpen] = useState(false);
-  const [menuStyle, setMenuStyle] = useState(null);
-  const wrapperRef = useRef(null);
-  const triggerRef = useRef(null);
-  const menuRef = useRef(null);
-  const normalizedOptions = options.map(toSelectOption);
-  const selected = normalizedOptions.find((option) => option.value === value);
-  const displayLabel = selected?.label || placeholder;
-  const isPermissionSelect = className.includes("permission-level-select");
-
-  useEffect(() => {
-    if (!open) {
-      setMenuStyle(null);
-      return undefined;
-    }
-    if (typeof window === "undefined") return undefined;
-
-    const updateMenuPosition = () => {
-      const rect = triggerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-
-      const gap = 6;
-      const preferredMaxHeight = 240;
-      const optionHeight = Math.min(preferredMaxHeight, normalizedOptions.length * 44 + 12);
-      const menuWidth = Math.min(
-        Math.max(rect.width, isPermissionSelect ? 180 : rect.width),
-        window.innerWidth - 16
-      );
-      const menuLeft = Math.min(Math.max(8, rect.left), window.innerWidth - menuWidth - 8);
-      const spaceBelow = window.innerHeight - rect.bottom - gap;
-      const spaceAbove = rect.top - gap;
-      const placeAbove = spaceBelow < optionHeight && spaceAbove > spaceBelow;
-      const availableHeight = Math.max(
-        128,
-        Math.min(preferredMaxHeight, (placeAbove ? spaceAbove : spaceBelow) - 8)
-      );
-
-      setMenuStyle({
-        left: menuLeft,
-        right: "auto",
-        top: placeAbove ? "auto" : rect.bottom + gap,
-        bottom: placeAbove ? window.innerHeight - rect.top + gap : "auto",
-        width: menuWidth,
-        maxHeight: availableHeight,
-      });
-    };
-
-    updateMenuPosition();
-    window.addEventListener("resize", updateMenuPosition);
-    window.addEventListener("scroll", updateMenuPosition, true);
-    return () => {
-      window.removeEventListener("resize", updateMenuPosition);
-      window.removeEventListener("scroll", updateMenuPosition, true);
-    };
-  }, [open, normalizedOptions.length, isPermissionSelect]);
-
-  useEffect(() => {
-    if (!open || typeof document === "undefined") return undefined;
-
-    const closeOnOutsidePointer = (event) => {
-      if (wrapperRef.current?.contains(event.target) || menuRef.current?.contains(event.target)) return;
-      setOpen(false);
-    };
-
-    document.addEventListener("mousedown", closeOnOutsidePointer);
-    return () => document.removeEventListener("mousedown", closeOnOutsidePointer);
-  }, [open]);
-
-  const menu = (
-    <div
-      className={`custom-select-menu floating-select-menu ${isPermissionSelect ? "permission-level-menu" : ""}`}
-      role="listbox"
-      ref={menuRef}
-      style={menuStyle || undefined}
-    >
-      {normalizedOptions.map((option) => {
-        const isSelected = option.value === value;
-        return (
-          <button
-            type="button"
-            role="option"
-            aria-selected={isSelected}
-            className={`custom-select-option ${isSelected ? "selected" : ""}`}
-            key={option.value}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              onChange(option.value);
-              setOpen(false);
-            }}
-          >
-            <Check size={16} />
-            <span>{option.label}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-
-  return (
-    <div
-      ref={wrapperRef}
-      className={`custom-select ${open ? "open" : ""} ${disabled ? "disabled" : ""} ${className}`}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget) && !menuRef.current?.contains(event.relatedTarget)) setOpen(false);
-      }}
-    >
-      <button
-        ref={triggerRef}
-        type="button"
-        className="custom-select-trigger"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <span>{displayLabel}</span>
-        <ChevronDown size={17} />
-      </button>
-      {open && !disabled && menuStyle && typeof document !== "undefined" && createPortal(menu, document.body)}
-    </div>
-  );
-}
-
-function Sidebar({ screen, setScreen, previewPermissions, onLogout }) {
-  const visibleNavItems = previewPermissions
-    ? navItems.filter((item) => hasPreviewAccess(previewPermissions, previewNavModules[item.screen] || []))
-    : navItems;
-  const visibleSystemSubItems = previewPermissions
-    ? systemSubItems.filter((item) => hasPreviewAccess(previewPermissions, previewNavModules[item.screen] || []))
-    : systemSubItems;
-  const systemScreens = ["system-users", "system-permissions", "channel-config", "approval-config", "sla-config"];
-  const [isSystemOpen, setIsSystemOpen] = useState(() => {
-    if (systemScreens.includes(screen)) return true;
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("forecast-kd01-system-nav-open") === "1";
-  });
-
-  useEffect(() => {
-    if (systemScreens.includes(screen)) setIsSystemOpen(true);
-  }, [screen]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("forecast-kd01-system-nav-open", isSystemOpen ? "1" : "0");
-  }, [isSystemOpen]);
-
-  return (
-    <aside className="sidebar">
-      <div>
-        <div className="brand">
-          <div className="brand-mark">
-            <BarChart3 size={20} />
-          </div>
-          <div>
-            <strong>Elmich Ops</strong>
-            <span>Operations Platform</span>
-          </div>
-        </div>
-
-        <nav className="nav-list" aria-label="Điều hướng chính">
-          {visibleNavItems.map((item) => {
-            const Icon = item.icon;
-            const isDashboard =
-              item.label === "Dashboard" && screen === "overview";
-            const isForecastFlow =
-              item.label === "Lịch Forecast" &&
-              ["list", "detail", "create-1", "create-2"].includes(screen);
-            const isTaskFlow =
-              item.label === "Công việc" && ["tasks", "task-update"].includes(screen);
-            const isAppraisalFlow =
-              item.label === "Thẩm định" && ["appraisal", "appraisal-detail"].includes(screen);
-            const isApprovalFlow =
-              item.label === "Phê duyệt" && ["approval", "approval-detail"].includes(screen);
-            const isStorageFlow =
-              item.label === "Kho lưu trữ" && ["storage", "storage-folder", "storage-file"].includes(screen);
-            const isSystemFlow =
-              item.label === "Quản trị hệ thống" && ["system-users", "system-permissions", "channel-config", "approval-config", "sla-config"].includes(screen);
-            const isActive = isDashboard || isForecastFlow || isTaskFlow || isAppraisalFlow || isApprovalFlow || isStorageFlow || isSystemFlow;
-            const isSystemItem = item.label === "Quản trị hệ thống";
-
-            return (
-              <React.Fragment key={item.label}>
-                <button
-                  className={`nav-item ${isActive ? "active" : ""} ${isSystemItem ? "system-nav-trigger" : ""}`}
-                  onClick={() => {
-                    if (isSystemItem) {
-                      setIsSystemOpen((current) => !current);
-                      return;
-                    }
-                    setScreen(item.screen);
-                  }}
-                >
-                  <Icon size={20} />
-                  <span>{item.label}</span>
-                  {isSystemItem && <ChevronDown className={`nav-chevron ${isSystemOpen ? "open" : ""}`} size={16} />}
-                </button>
-                {isSystemItem && isSystemOpen && visibleSystemSubItems.length > 0 && (
-                  <div className="sidebar-submenu">
-                    {visibleSystemSubItems.map((subItem) => {
-                      const SubIcon = subItem.icon;
-                      return (
-                        <button
-                          key={subItem.screen}
-                          className={`sidebar-subitem ${screen === subItem.screen ? "active" : ""}`}
-                          onClick={() => setScreen(subItem.screen)}
-                        >
-                          <SubIcon size={16} />
-                          <span>{subItem.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </React.Fragment>
-            );
-          })}
-        </nav>
-      </div>
-
-      <div className="sidebar-footer">
-        <button className="nav-item compact" type="button">
-          <HelpCircle size={20} />
-          <span>Hỗ trợ</span>
-        </button>
-        <button className="nav-item compact" type="button" onClick={onLogout}>
-          <LogOut size={20} />
-          <span>Đăng xuất</span>
-        </button>
-      </div>
-    </aside>
-  );
-}
-
-function Topbar({ title, search, showBack, hideSearch, onBack, currentUser, authRequired, onLogout }) {
-  const displayName = currentUser?.name || "Nguyễn Tú Anh";
-  const initials = currentUser?.initials || displayName.trim().split(/\s+/).slice(-2).map((part) => part[0]).join("").toUpperCase() || "NA";
-
-  return (
-    <header className="topbar">
-      <div className="topbar-title">
-        {showBack && (
-          <button className="icon-button ghost" onClick={onBack} title="Quay lại">
-            <ArrowLeft size={22} />
-          </button>
-        )}
-        <h1>{title}</h1>
-      </div>
-      <div className="topbar-tools">
-        {!hideSearch && (
-          <label className="search-box">
-            <Search size={20} />
-            <input placeholder={search} />
-          </label>
-        )}
-        <button className="icon-button" title="Thông báo">
-          <Bell size={20} />
-        </button>
-        <button className="icon-button" title="Ứng dụng">
-          <Grip size={20} />
-        </button>
-        <button className="icon-button optional" title="Trợ giúp">
-          <CircleHelp size={20} />
-        </button>
-        <button className="user-chip" type="button" onClick={authRequired ? onLogout : undefined} title={authRequired ? "Đăng xuất" : displayName}>
-          <strong>{displayName}</strong>
-          <span className="avatar">{initials}</span>
-        </button>
-      </div>
-    </header>
   );
 }
 
@@ -3385,7 +3073,7 @@ function SystemUsers({
       );
     }
     try {
-      await apiRequest("/api/admin/users", {
+      await requestJson("/api/admin/users", {
         method: "POST",
         body: JSON.stringify({ user: nextUser }),
       });
@@ -3556,7 +3244,7 @@ function SystemPermissions({
       },
     }));
     try {
-      await apiRequest("/api/admin/role-permissions", {
+      await requestJson("/api/admin/role-permissions", {
         method: "PATCH",
         body: JSON.stringify({ roleId: selectedRole.id, module, level }),
       });
@@ -3570,7 +3258,7 @@ function SystemPermissions({
     if (!name || !setRoles) return;
     const id = `custom-${Date.now()}`;
     try {
-      const payload = await apiRequest("/api/admin/roles", {
+      const payload = await requestJson("/api/admin/roles", {
         method: "POST",
         body: JSON.stringify({ role: newRole }),
       });
@@ -3602,7 +3290,7 @@ function SystemPermissions({
   const deleteRole = async (roleId) => {
     if (roleId === "admin" || !setRoles) return;
     try {
-      await apiRequest("/api/admin/roles", {
+      await requestJson("/api/admin/roles", {
         method: "DELETE",
         body: JSON.stringify({ roleId }),
       });
@@ -3623,7 +3311,7 @@ function SystemPermissions({
   const addUsersToRole = async (userIds) => {
     if (!setUsers || !userIds.length) return;
     try {
-      await apiRequest("/api/admin/role-users", {
+      await requestJson("/api/admin/role-users", {
         method: "POST",
         body: JSON.stringify({ roleId: selectedRole.id, userIds }),
       });
@@ -3980,7 +3668,7 @@ function ChannelFrameworkConfig({ onUsers, onPermissions, onApprovalConfig, onSl
   const asmCount = rows.reduce((sum, row) => sum + row.asms.length, 0);
   const saveChannel = async (channel) => {
     try {
-      await apiRequest("/api/admin/channels", {
+      await requestJson("/api/admin/channels", {
         method: "POST",
         body: JSON.stringify({ channel }),
       });
@@ -3992,7 +3680,7 @@ function ChannelFrameworkConfig({ onUsers, onPermissions, onApprovalConfig, onSl
   };
   const deleteChannel = async (channel) => {
     try {
-      await apiRequest("/api/admin/channels", {
+      await requestJson("/api/admin/channels", {
         method: "DELETE",
         body: JSON.stringify({ code: channel.code, channel: channel.channel }),
       });
