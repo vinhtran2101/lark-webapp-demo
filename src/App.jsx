@@ -3223,8 +3223,18 @@ function SystemPermissions({
     name: "",
     description: "",
   });
-  const selectedRole = roles.find((role) => role.id === selectedRoleId) || roles[0];
-  const selectedPermissions = permissionDrafts[selectedRole.id] || {};
+  const fallbackRole = roleDefinitions[0] || {
+    id: "admin",
+    name: "Admin",
+    description: "Full access",
+    scope: "System",
+    users: 0,
+    risk: "High",
+  };
+  const rolesForDisplay = roles.length ? roles : [fallbackRole];
+  const selectedRole = rolesForDisplay.find((role) => role.id === selectedRoleId) || rolesForDisplay[0];
+  const selectedPermissions = permissionDrafts?.[selectedRole.id] || {};
+  const permissionRowsForDisplay = activePermissionMatrix.length ? activePermissionMatrix : permissionMatrix;
   const roleUserCounts = users.reduce((acc, user) => {
     acc[user.role] = (acc[user.role] || 0) + 1;
     return acc;
@@ -3280,7 +3290,7 @@ function SystemPermissions({
         ]);
         setPermissionDrafts((current) => ({
           ...current,
-          [id]: activePermissionMatrix.reduce((acc, row) => ({ ...acc, [row.module]: "view" }), {}),
+          [id]: permissionRowsForDisplay.reduce((acc, row) => ({ ...acc, [row.module]: "view" }), {}),
         }));
       }
     } catch (error) {
@@ -3360,7 +3370,7 @@ function SystemPermissions({
       </div>
 
       <div className="admin-metric-grid">
-        <AdminMetric label="Vai trò" value={roles.length} hint="Nhóm quyền" icon={Lock} tone="blue" />
+        <AdminMetric label="Vai trò" value={rolesForDisplay.length} hint="Nhóm quyền" icon={Lock} tone="blue" />
         <AdminMetric label="Nhân sự" value={users.length} hint="Đang quản lý" icon={Users} tone="green" />
         <AdminMetric label="Phạm vi" value="8" hint="Lớp dữ liệu KD01" icon={Settings} tone="cyan" />
         <AdminMetric label="Rủi ro" value="4" hint="Role nhạy cảm" icon={AlertTriangle} tone="orange" />
@@ -3371,7 +3381,7 @@ function SystemPermissions({
           <div className="panel-title-row">
             <h3>Vai trò</h3>
           </div>
-          {roles.map((role) => (
+          {rolesForDisplay.map((role) => (
             <article className={`role-list-item ${role.id === selectedRoleId ? "active" : ""} ${role.id !== "admin" ? "can-delete" : ""}`} key={role.id}>
               <button className="role-pick-button" onClick={() => setSelectedRoleId(role.id)}>
                 <div>
@@ -3414,7 +3424,7 @@ function SystemPermissions({
               <span>Quyền</span>
               <span>Dữ liệu</span>
             </div>
-            {activePermissionMatrix.map((row) => {
+            {permissionRowsForDisplay.map((row) => {
               const level = selectedPermissions[row.module] || normalizePermissionLevel(row[selectedRole.id]);
               return (
                 <article className="permission-row" key={row.module}>

@@ -1,7 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { BarChart3, ChevronDown, HelpCircle, LogOut } from "lucide-react";
 
-const systemScreens = ["system-users", "system-permissions", "channel-config", "approval-config", "sla-config"];
+const SYSTEM_SCREENS = ["system-users", "system-permissions", "channel-config", "approval-config", "sla-config"];
+const SUPPORT_LABEL = "H\u1ed7 tr\u1ee3";
+const LOGOUT_LABEL = "\u0110\u0103ng xu\u1ea5t";
+const NAV_ARIA_LABEL = "\u0110i\u1ec1u h\u01b0\u1edbng ch\u00ednh";
+
+const ACTIVE_SCREEN_GROUPS = {
+  overview: ["overview"],
+  list: ["list", "detail", "create-1", "create-2"],
+  tasks: ["tasks", "task-update"],
+  appraisal: ["appraisal", "appraisal-detail"],
+  approval: ["approval", "approval-detail"],
+  storage: ["storage", "storage-folder", "storage-file"],
+  "system-users": SYSTEM_SCREENS,
+};
 
 export default function Sidebar({
   screen,
@@ -20,13 +33,13 @@ export default function Sidebar({
     ? systemSubItems.filter((item) => hasPreviewAccess(previewPermissions, previewNavModules[item.screen] || []))
     : systemSubItems;
   const [isSystemOpen, setIsSystemOpen] = useState(() => {
-    if (systemScreens.includes(screen)) return true;
+    if (SYSTEM_SCREENS.includes(screen)) return true;
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("forecast-kd01-system-nav-open") === "1";
   });
 
   useEffect(() => {
-    if (systemScreens.includes(screen)) setIsSystemOpen(true);
+    if (SYSTEM_SCREENS.includes(screen)) setIsSystemOpen(true);
   }, [screen]);
 
   useEffect(() => {
@@ -47,35 +60,17 @@ export default function Sidebar({
           </div>
         </div>
 
-        <nav className="nav-list" aria-label="Điều hướng chính">
+        <nav className="nav-list" aria-label={NAV_ARIA_LABEL}>
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
-            const isDashboard = item.label === "Dashboard" && screen === "overview";
-            const isForecastFlow =
-              item.label === "Lá»‹ch Forecast" && ["list", "detail", "create-1", "create-2"].includes(screen);
-            const isTaskFlow = item.label === "CÃ´ng viá»‡c" && ["tasks", "task-update"].includes(screen);
-            const isAppraisalFlow =
-              item.label === "Tháº©m Ä‘á»‹nh" && ["appraisal", "appraisal-detail"].includes(screen);
-            const isApprovalFlow = item.label === "PhÃª duyá»‡t" && ["approval", "approval-detail"].includes(screen);
-            const isStorageFlow =
-              item.label === "Kho lÆ°u trá»¯" && ["storage", "storage-folder", "storage-file"].includes(screen);
-            const isSystemFlow =
-              item.label === "Quáº£n trá»‹ há»‡ thá»‘ng" &&
-              ["system-users", "system-permissions", "channel-config", "approval-config", "sla-config"].includes(screen);
-            const isActive =
-              isDashboard ||
-              isForecastFlow ||
-              isTaskFlow ||
-              isAppraisalFlow ||
-              isApprovalFlow ||
-              isStorageFlow ||
-              isSystemFlow;
-            const isSystemItem = item.label === "Quáº£n trá»‹ há»‡ thá»‘ng";
+            const isSystemItem = item.screen === "system-users";
+            const isActive = (ACTIVE_SCREEN_GROUPS[item.screen] || [item.screen]).includes(screen);
 
             return (
-              <React.Fragment key={item.label}>
+              <React.Fragment key={item.screen || item.label}>
                 <button
                   className={`nav-item ${isActive ? "active" : ""} ${isSystemItem ? "system-nav-trigger" : ""}`}
+                  type="button"
                   onClick={() => {
                     if (isSystemItem) {
                       setIsSystemOpen((current) => !current);
@@ -96,6 +91,7 @@ export default function Sidebar({
                         <button
                           key={subItem.screen}
                           className={`sidebar-subitem ${screen === subItem.screen ? "active" : ""}`}
+                          type="button"
                           onClick={() => setScreen(subItem.screen)}
                         >
                           <SubIcon size={16} />
@@ -114,11 +110,11 @@ export default function Sidebar({
       <div className="sidebar-footer">
         <button className="nav-item compact" type="button">
           <HelpCircle size={20} />
-          <span>Há»— trá»£</span>
+          <span>{SUPPORT_LABEL}</span>
         </button>
         <button className="nav-item compact" type="button" onClick={onLogout}>
           <LogOut size={20} />
-          <span>ÄÄƒng xuáº¥t</span>
+          <span>{LOGOUT_LABEL}</span>
         </button>
       </div>
     </aside>
