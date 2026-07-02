@@ -47,6 +47,8 @@ import {
 import AppSidebar from "./components/layout/Sidebar";
 import Topbar from "./components/layout/Topbar";
 import CustomSelect from "./components/ui/CustomSelect";
+import AdminMetric from "./components/admin/AdminMetric";
+import AuthGate, { PreviewAccessDenied, RolePreviewBanner } from "./components/auth/AuthGate";
 import { buildAppDataFromBootstrap, buildMockAppData } from "./data/mockViewModels";
 import { fetchAuthState, fetchBootstrapData, requestJson } from "./services/apiClient";
 
@@ -1226,86 +1228,6 @@ function App() {
         </div>
       </main>
     </div>
-  );
-}
-
-function RolePreviewBanner({ role, onExit }) {
-  return (
-    <div className="role-preview-banner">
-      <div>
-        <span>Đang xem trước vai trò</span>
-        <strong>{role.name}</strong>
-        <small>{role.description}</small>
-      </div>
-      <button className="secondary-button" onClick={onExit}>
-        <X size={18} />
-        Thoát xem trước
-      </button>
-    </div>
-  );
-}
-
-function PreviewAccessDenied({ role, onExit }) {
-  return (
-    <section className="preview-denied-card">
-      <Lock size={28} />
-      <h2>Vai trò {role?.name} không có quyền truy cập màn hình này</h2>
-      <p>Các menu và khu vực không nằm trong phạm vi quyền đã được ẩn trong chế độ xem trước.</p>
-      <button className="primary-button" onClick={onExit}>
-        <X size={18} />
-        Thoát xem trước
-      </button>
-    </section>
-  );
-}
-
-function AuthGate({ auth }) {
-  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
-  const error = params.get("auth_error");
-  const errorMessage =
-    error === "not_allowed"
-      ? "Tài khoản Lark này chưa được cấp quyền trong Forecast KD01."
-      : error === "account_inactive"
-        ? "Tài khoản đang inactive hoặc bị khóa trong hệ thống."
-        : error === "lark_failed"
-          ? "Lark chưa xác thực được phiên đăng nhập. Kiểm tra lại cấu hình app Lark."
-          : "";
-
-  return (
-    <main className="auth-gate-page">
-      <section className="auth-gate-card">
-        <span className="auth-gate-icon">
-          <Lock size={28} />
-        </span>
-        <div>
-          <span className="eyebrow">Forecast KD01</span>
-          <h1>{auth.loading ? "Đang kiểm tra phiên đăng nhập" : "Đăng nhập bằng Lark"}</h1>
-          <p>
-            Hệ thống dùng Lark để xác định người truy cập, sau đó áp quyền theo role đã cấu hình trong PostgreSQL.
-          </p>
-        </div>
-        {errorMessage && (
-          <div className="auth-gate-warning">
-            <AlertTriangle size={18} />
-            {errorMessage}
-          </div>
-        )}
-        {!auth.loading && !auth.configured && (
-          <div className="auth-gate-warning">
-            <AlertTriangle size={18} />
-            Chưa cấu hình LARK_APP_ID / LARK_APP_SECRET trên server.
-          </div>
-        )}
-        {auth.loading ? (
-          <div className="auth-gate-loading">Đang tải...</div>
-        ) : (
-          <a className="primary-button auth-gate-login" href={auth.loginUrl || "/api/auth/lark/start"}>
-            Đăng nhập Lark
-            <ArrowRight size={18} />
-          </a>
-        )}
-      </section>
-    </main>
   );
 }
 
@@ -3566,21 +3488,6 @@ function SystemPermissions({
         />
       )}
     </section>
-  );
-}
-
-function AdminMetric({ label, value, hint, icon: Icon, tone }) {
-  return (
-    <article className="admin-metric-card">
-      <div>
-        <span>{label}</span>
-        <strong>{value}</strong>
-        <small>{hint}</small>
-      </div>
-      <i className={tone}>
-        <Icon size={22} />
-      </i>
-    </article>
   );
 }
 
