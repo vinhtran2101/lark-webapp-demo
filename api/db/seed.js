@@ -277,29 +277,47 @@ export default async function handler(req, res) {
 
       for (const task of mockDatabase.forecastTasks) {
         ids.forecastTasks.set(task.id, await upsertForecastTask(client, task, ids));
+        if (task.ownerId && ids.users.get(task.ownerId)) {
+          await client.query(
+            `
+              insert into task_assignments (forecast_task_id, user_id, role_code, status, assigned_at)
+              values ($1, $2, 'ASM', 'active', $3)
+              on conflict (forecast_task_id, user_id, role_code) do update set
+                status = 'active',
+                updated_at = now()
+            `,
+            [ids.forecastTasks.get(task.id), ids.users.get(task.ownerId), task.deadlineAt]
+          );
+        }
       }
 
       for (const file of mockDatabase.forecastFiles) {
+        const sourceTask = mockDatabase.forecastTasks.find((item) => item.id === file.forecastTaskId);
         await client.query(
           `
             insert into forecast_files
-              (forecast_task_id, file_name, file_url, file_size, version, uploaded_by, uploaded_at, note)
-            values ($1, $2, $3, $4, $5, $6, $7, $8)
+              (forecast_task_id, channel_id, asm_user_id, file_name, file_url, storage_path, file_size, version, uploaded_by, uploaded_at, note, status)
+            values ($1, $2, $3, $4, $5, $5, $6, $7, $3, $8, $9, 'approved')
             on conflict (forecast_task_id, version) do update set
+              channel_id = excluded.channel_id,
+              asm_user_id = excluded.asm_user_id,
               file_name = excluded.file_name,
               file_url = excluded.file_url,
+              storage_path = excluded.storage_path,
               file_size = excluded.file_size,
               uploaded_by = excluded.uploaded_by,
               uploaded_at = excluded.uploaded_at,
-              note = excluded.note
+              note = excluded.note,
+              status = excluded.status
           `,
           [
             ids.forecastTasks.get(file.forecastTaskId),
+            ids.salesChannels.get(sourceTask?.channelId),
+            ids.users.get(file.uploadedBy) || null,
             file.fileName,
             file.fileUrl,
             file.fileSize,
             file.version,
-            ids.users.get(file.uploadedBy) || null,
             file.uploadedAt,
             file.note,
           ]
@@ -369,6 +387,10 @@ export default async function handler(req, res) {
         "forecast_cycles",
         "forecast_tasks",
         "forecast_files",
+        "task_assignments",
+        "approval_requests",
+        "approval_request_files",
+        "approval_events",
         "activity_logs",
       ];
 

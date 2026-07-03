@@ -34,3 +34,38 @@ export async function fetchBootstrapData() {
   });
   return payload.data;
 }
+
+export async function assignForecastTask(taskId, asmUserIds, note = "") {
+  return requestJson("/api/forecast?route=assign-task", {
+    method: "POST",
+    body: JSON.stringify({ taskId, asmUserIds, note }),
+  });
+}
+
+export async function createForecastUploadIntent({ taskId, fileName, mimeType = "" }) {
+  return requestJson("/api/forecast?route=create-upload-intent", {
+    method: "POST",
+    body: JSON.stringify({ taskId, fileName, mimeType }),
+  });
+}
+
+export async function saveForecastFileMetadata(payload) {
+  return requestJson("/api/forecast?route=save-file", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function submitForecastTask(taskId, fileIds = []) {
+  return requestJson("/api/forecast?route=submit-task", {
+    method: "POST",
+    body: JSON.stringify({ taskId, fileIds }),
+  });
+}
+
+export async function syncForecastApprovals(approvalRequestId = "") {
+  return requestJson("/api/forecast?route=sync-approval", {
+    method: "POST",
+    body: JSON.stringify({ approvalRequestId }),
+  });
+}

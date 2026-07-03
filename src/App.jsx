@@ -53,7 +53,16 @@ import SystemUsers from "./features/admin/SystemUsersPage";
 import SystemPermissions from "./features/admin/SystemPermissionsPage";
 import ChannelFrameworkConfig from "./features/admin/ChannelFrameworkConfigPage";
 import { buildAppDataFromBootstrap, buildMockAppData } from "./data/mockViewModels";
-import { fetchAuthState, fetchBootstrapData, requestJson } from "./services/apiClient";
+import {
+  assignForecastTask,
+  createForecastUploadIntent,
+  fetchAuthState,
+  fetchBootstrapData,
+  requestJson,
+  saveForecastFileMetadata,
+  submitForecastTask,
+  syncForecastApprovals,
+} from "./services/apiClient";
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, screen: "overview" },
@@ -72,6 +81,18 @@ const systemSubItems = [
   { label: "Quy trình", icon: ClipboardList, screen: "approval-config" },
   { label: "SLA", icon: Clock3, screen: "sla-config" },
 ];
+
+function formatFileSize(bytes = 0) {
+  if (!bytes) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = Number(bytes) || 0;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
 
 const recentRows = [
   {
@@ -424,6 +445,11 @@ const statusToneMap = {
   "Phát hành": "success",
   "Không duyệt thẩm định": "danger",
   "CEO không duyệt": "danger",
+  "Đang gửi duyệt": "warning",
+  "Đang duyệt trên Lark": "warning",
+  "Cần chỉnh sửa": "danger",
+  "Đã từ chối": "danger",
+  "Đã duyệt": "success",
   "Quá hạn": "danger",
 };
 
@@ -789,51 +815,105 @@ function App() {
     setScreen("detail");
   };
 
-  const handleTaskSubmit = (taskId, fileName, note) => {
+  const handleTaskSubmit = async (taskId, fileName, note, selectedFile = null) => {
     const task = tasks.find((item) => item.id === taskId);
     if (!task) return;
 
-    updateTaskStatus(
-      taskId,
-      {
-        file: fileName,
-        fileSize: "4.2 MB",
-        due: "Đã nộp file, chờ RSM duyệt",
-        progress: 55,
-        status: "Chờ RSM duyệt",
-      },
-      {
+    try {
+      showToast("Đang lưu file và tạo Lark Approval...");
+      const mimeType = selectedFile?.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      const uploadIntent = await createForecastUploadIntent({ taskId, fileName, mimeType });
+      if (selectedFile && uploadIntent.intent?.mode === "signed-upload" && uploadIntent.intent?.signedUrl) {
+        let uploadResponse = await fetch(uploadIntent.intent.signedUrl, {
+          method: "PUT",
+          headers: { "Content-Type": mimeType },
+          body: selectedFile,
+        });
+        if (!uploadResponse.ok) {
+          uploadResponse = await fetch(uploadIntent.intent.signedUrl, {
+            method: "POST",
+            headers: { "Content-Type": mimeType },
+            body: selectedFile,
+          });
+        }
+        if (!uploadResponse.ok) {
+          throw new Error("Không upload được file lên Supabase Storage.");
+        }
+      }
+      const savedFile = await saveForecastFileMetadata({
+        taskId,
+        fileName,
+        fileSize: formatFileSize(selectedFile?.size) || "4.2 MB",
+        mimeType,
+        storagePath: uploadIntent.intent?.storagePath || "",
+        fileUrl: uploadIntent.intent?.storagePath || `/mock/files/${fileName}`,
+        version: uploadIntent.intent?.version,
+        note,
+      });
+      const approval = await submitForecastTask(taskId, savedFile.file?.id ? [savedFile.file.id] : []);
+      await loadDatabaseData();
+      addEvent({
         icon: Upload,
         tone: "green",
         title: `${task.channel} đã gửi file Forecast`,
-        body: note || `${fileName} đã được upload và chuyển sang RSM duyệt.`,
-      }
-    );
-    showToast("Đã gửi cập nhật, task chuyển sang chờ RSM duyệt.");
-    setScreen("tasks");
+        body: approval.approval?.approvalUrl
+          ? "Lark Approval đã được tạo và đang chờ RSM duyệt."
+          : "File đã được submit và lưu vào database.",
+      });
+      showToast("Đã submit file và tạo approval theo luồng thật.");
+      setScreen("tasks");
+    } catch (error) {
+      showToast(error.message || "Không thể submit task.");
+      addEvent({
+        icon: AlertTriangle,
+        tone: "red",
+        title: `Chưa thể submit ${task.channel}`,
+        body: error.message || "Kiểm tra lại file, người duyệt hoặc cấu hình Lark.",
+      });
+    }
   };
 
-  const handleAssignTask = (taskId, user) => {
+  const handleAssignTask = async (taskId, user) => {
     const task = tasks.find((item) => item.id === taskId);
     if (!task || !user) return;
 
-    updateTaskStatus(
-      taskId,
-      {
-        owner: user.name,
-        ownerRole: user.title || user.role || "ASM phụ trách",
-        due: `${user.name} nhận task, chờ cập nhật file Forecast`,
-        progress: Math.max(task.progress || 0, 10),
-        status: "Chờ ASM cập nhật",
-      },
-      {
+    try {
+      await assignForecastTask(taskId, [user.id], `Gán ${user.name} phụ trách task.`);
+      await loadDatabaseData();
+      addEvent({
         icon: UserPlus,
         tone: "blue",
         title: `Đã phân công ${task.channel}`,
         body: `${user.name} được gán phụ trách task Forecast kênh này.`,
-      }
-    );
-    showToast(`Đã phân công ${user.name} phụ trách ${task.channel}.`);
+      });
+      showToast(`Đã phân công ${user.name} phụ trách ${task.channel}.`);
+    } catch (error) {
+      showToast(error.message || "Không thể phân công ASM.");
+    }
+  };
+
+  const handleSyncApprovals = async () => {
+    try {
+      showToast("Đang đồng bộ trạng thái Lark Approval...");
+      const payload = await syncForecastApprovals();
+      await loadDatabaseData();
+      const resultCount = Array.isArray(payload.result) ? payload.result.length : 1;
+      addEvent({
+        icon: Cloud,
+        tone: "blue",
+        title: "Đã đồng bộ Lark Approval",
+        body: `Hệ thống vừa kiểm tra ${resultCount} approval request đang mở.`,
+      });
+      showToast("Đã đồng bộ trạng thái approval về KD01.");
+    } catch (error) {
+      showToast(error.message || "Không thể đồng bộ Lark Approval.");
+      addEvent({
+        icon: AlertTriangle,
+        tone: "red",
+        title: "Đồng bộ Lark Approval lỗi",
+        body: error.message || "Kiểm tra lại cấu hình Lark hoặc quyền API.",
+      });
+    }
   };
 
   const handleRsmApprove = (taskId) => {
@@ -1073,6 +1153,7 @@ function App() {
               onOpenApproval={openTaskApproval}
               onRsmApprove={handleRsmApprove}
               onGdkdApprove={handleGdkdApprove}
+              onSyncApprovals={handleSyncApprovals}
               onSubmitAppraisal={handleSubmitAppraisal}
             />
           )}
@@ -1812,6 +1893,15 @@ function TaskUpdate({ onBack, task, forecast, onSubmit }) {
     displayTask.file || `Forecast_${displayTask.channel.replace(/\s+/g, "_")}_${forecast?.monthShort || "T07_2026"}.xlsx`
   );
   const [note, setNote] = useState("");
+  const fileInputRef = useRef(null);
+  const [selectedFile, setSelectedFile] = useState(null);
+
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setSelectedFile(file);
+    setFileName(file.name);
+  };
 
   return (
     <section className="task-update-page">
@@ -1864,7 +1954,16 @@ function TaskUpdate({ onBack, task, forecast, onSubmit }) {
             <UploadCloud size={42} />
             <strong>Kéo và thả tệp vào đây hoặc Chọn tệp từ máy tính</strong>
             <span>Hỗ trợ định dạng XLSX/CSV tối đa 50MB</span>
-            <button className="secondary-button">Duyệt tệp tin</button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              hidden
+              onChange={handleFileChange}
+            />
+            <button className="secondary-button" type="button" onClick={() => fileInputRef.current?.click()}>
+              Duyệt tệp tin
+            </button>
           </div>
           <div className="uploaded-file">
             <span className="file-icon blue">
@@ -1872,7 +1971,13 @@ function TaskUpdate({ onBack, task, forecast, onSubmit }) {
             </span>
             <div>
               <strong>{fileName}</strong>
-              <small>{displayTask.file ? "File đã có trong mock data" : "File mock sẽ được gửi khi bấm cập nhật"}</small>
+              <small>
+                {selectedFile
+                  ? `${formatFileSize(selectedFile.size)} • Sẵn sàng upload lên Storage`
+                  : displayTask.file
+                    ? "File đã có trong database"
+                    : "Chưa chọn file thật, hệ thống sẽ chạy metadata test"}
+              </small>
             </div>
             <CheckCircle2 size={22} />
             <button className="icon-button table-action" title="Xóa">
@@ -1888,7 +1993,7 @@ function TaskUpdate({ onBack, task, forecast, onSubmit }) {
             <Save size={18} />
             Lưu bản nháp
           </button>
-          <button className="primary-button" onClick={() => onSubmit(displayTask.id, fileName, note)}>
+          <button className="primary-button" onClick={() => onSubmit(displayTask.id, fileName, note, selectedFile)}>
             <CheckCircle2 size={18} />
             Gửi cập nhật
           </button>
@@ -3190,6 +3295,7 @@ function ForecastDetail({
   onOpenApproval,
   onRsmApprove,
   onGdkdApprove,
+  onSyncApprovals,
   onSubmitAppraisal,
 }) {
   const displayForecast = forecast || initialForecasts[0];
@@ -3232,6 +3338,10 @@ function ForecastDetail({
           <h2>Lịch Forecast KD01 - {displayForecast.month}</h2>
         </div>
         <div className="action-row">
+          <button className="secondary-button" onClick={onSyncApprovals}>
+            <Cloud size={18} />
+            Đồng bộ Lark
+          </button>
           <button className="secondary-button">
             <Pencil size={18} />
             Chỉnh sửa
@@ -3334,6 +3444,7 @@ function ForecastDetail({
                   <span className="file-pill">
                     <FileText size={14} />
                     {row.file}
+                    {row.fileVersion && <small>v{row.fileVersion}</small>}
                   </span>
                 )}
                 {!row.file && (
@@ -3356,6 +3467,15 @@ function ForecastDetail({
                 <button className="icon-button table-action" title="Báo cáo" onClick={() => onOpenReport(row.id)}>
                   <BarChart3 size={18} />
                 </button>
+                {row.approvalUrl && (
+                  <button
+                    className="icon-button table-action"
+                    title="Mở Lark Approval"
+                    onClick={() => window.open(row.approvalUrl, "_blank", "noopener,noreferrer")}
+                  >
+                    <Share2 size={18} />
+                  </button>
+                )}
                 <button className="icon-button table-action" title="Thẩm định" onClick={() => onOpenAppraisal(row.id)}>
                   <Star size={18} />
                 </button>

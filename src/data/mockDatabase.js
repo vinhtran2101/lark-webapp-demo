@@ -60,7 +60,7 @@ export const mockModules = [
 
 const permissionSeed = {
   forecast_schedule: { admin: "full", planning: "scoped", asm: "view", rsm: "view", gdkd: "view", supply: "view", finance: "view", bi: "view", factory: "view", ceo: "view", viewer: "view" },
-  task_assignment: { admin: "full", planning: "scoped", asm: "scoped", rsm: "view", gdkd: "view", supply: "locked", finance: "locked", bi: "locked", factory: "locked", ceo: "view", viewer: "locked" },
+  task_assignment: { admin: "full", planning: "scoped", asm: "scoped", rsm: "scoped", gdkd: "view", supply: "locked", finance: "locked", bi: "locked", factory: "locked", ceo: "view", viewer: "locked" },
   forecast_submit: { admin: "full", planning: "view", asm: "scoped", rsm: "view", gdkd: "view", supply: "locked", finance: "locked", bi: "locked", factory: "locked", ceo: "view", viewer: "locked" },
   sales_approval: { admin: "full", planning: "view", asm: "locked", rsm: "scoped", gdkd: "scoped", supply: "locked", finance: "locked", bi: "locked", factory: "locked", ceo: "view", viewer: "locked" },
   supply_appraisal: { admin: "full", planning: "scoped", asm: "locked", rsm: "view", gdkd: "view", supply: "scoped", finance: "view", bi: "view", factory: "view", ceo: "view", viewer: "view" },

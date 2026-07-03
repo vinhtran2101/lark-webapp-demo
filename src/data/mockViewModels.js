@@ -29,6 +29,40 @@ const forecastStatusLabels = {
   rejected: "CEO không duyệt",
 };
 
+const taskStatusLabels = {
+  draft: "Chưa đủ thông tin",
+  assigned: "Chờ ASM cập nhật",
+  submitted: "Đang gửi duyệt",
+  in_approval: "Đang duyệt trên Lark",
+  need_revision: "Cần chỉnh sửa",
+  rejected: "Đã từ chối",
+  approved: "Đã duyệt",
+  completed: "Hoàn tất",
+};
+
+const taskStatusTones = {
+  draft: "neutral",
+  assigned: "neutral",
+  submitted: "warning",
+  in_approval: "warning",
+  need_revision: "danger",
+  rejected: "danger",
+  approved: "success",
+  completed: "success",
+};
+
+function normalizeTaskStatusLabel(status = "") {
+  const value = String(status || "").toLowerCase();
+  const plain = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (taskStatusLabels[value]) return value;
+  if (plain.includes("phat") || plain.includes("hoan")) return "completed";
+  if (plain.includes("gdkd") || plain.includes("duyet")) return "approved";
+  if (plain.includes("rsm") || plain.includes("submitted")) return "in_approval";
+  if (plain.includes("asm") || plain.includes("assigned")) return "assigned";
+  if (plain.includes("reject") || plain.includes("tu choi")) return "rejected";
+  return value || "draft";
+}
+
 function normalizeBootstrapDatabase(bootstrap = {}) {
   const rolesByUuid = new Map((bootstrap.roles || []).map((role) => [role.id, role]));
   const modulesByUuid = new Map((bootstrap.modules || []).map((module) => [module.id, module]));
@@ -135,6 +169,10 @@ function normalizeBootstrapDatabase(bootstrap = {}) {
     directorId: task.director_id,
     deadlineAt: task.deadline_at,
     status: task.status,
+    currentApprovalRequestId: task.current_approval_request_id || "",
+    currentFileVersion: task.current_file_version || null,
+    assignmentSnapshot: task.assignment_snapshot || {},
+    channelConfigSnapshot: task.channel_config_snapshot || {},
     statusTone: task.status_tone,
     progress: task.progress,
     dueText: task.due_text || "",
@@ -145,11 +183,60 @@ function normalizeBootstrapDatabase(bootstrap = {}) {
     forecastTaskId: file.forecast_task_id,
     fileName: file.file_name,
     fileUrl: file.file_url,
+    storagePath: file.storage_path || "",
+    channelId: file.channel_id || "",
+    asmUserId: file.asm_user_id || "",
+    status: file.status || "draft",
+    mimeType: file.mime_type || "",
     fileSize: file.file_size,
     version: file.version,
     uploadedBy: file.uploaded_by,
     uploadedAt: file.uploaded_at,
     note: file.note || "",
+  }));
+
+  const taskAssignments = (bootstrap.taskAssignments || []).map((assignment) => ({
+    id: assignment.id,
+    forecastTaskId: assignment.forecast_task_id,
+    userId: assignment.user_id,
+    roleCode: assignment.role_code,
+    status: assignment.status,
+    assignedAt: assignment.assigned_at,
+    note: assignment.note || "",
+  }));
+
+  const approvalRequests = (bootstrap.approvalRequests || []).map((request) => ({
+    id: request.id,
+    forecastCycleId: request.forecast_cycle_id,
+    forecastTaskId: request.forecast_task_id,
+    channelId: request.channel_id,
+    requesterId: request.requester_id,
+    submittedBy: request.submitted_by,
+    larkApprovalCode: request.lark_approval_code || "",
+    larkInstanceCode: request.lark_instance_code || "",
+    externalApprovalUrl: request.external_approval_url || "",
+    status: request.status,
+    approverSnapshot: request.approver_snapshot || {},
+    channelConfigSnapshot: request.channel_config_snapshot || {},
+    syncError: request.sync_error || "",
+    submittedAt: request.submitted_at,
+    resolvedAt: request.resolved_at,
+  }));
+
+  const approvalRequestFiles = (bootstrap.approvalRequestFiles || []).map((row) => ({
+    id: row.id,
+    approvalRequestId: row.approval_request_id,
+    forecastFileId: row.forecast_file_id,
+  }));
+
+  const approvalEvents = (bootstrap.approvalEvents || []).map((event) => ({
+    id: event.id,
+    approvalRequestId: event.approval_request_id,
+    eventKey: event.event_key,
+    eventType: event.event_type,
+    status: event.status,
+    payload: event.payload || {},
+    occurredAt: event.occurred_at,
   }));
 
   const activityLogs = (bootstrap.activityLogs || []).map((log) => ({
@@ -186,6 +273,10 @@ function normalizeBootstrapDatabase(bootstrap = {}) {
     forecastCycles,
     forecastTasks,
     forecastFiles,
+    taskAssignments,
+    approvalRequests,
+    approvalRequestFiles,
+    approvalEvents,
     activityLogs,
     permissionActivityLogs,
   };
@@ -236,6 +327,7 @@ function buildAppData(db, iconRegistry) {
   const rolesById = byId(db.roles);
   const channelsById = byId(db.salesChannels);
   const cyclesById = byId(db.forecastCycles);
+  const approvalRequestsById = byId(db.approvalRequests || []);
   const roleUserCounts = db.userRoles.reduce((acc, row) => {
     acc[row.roleId] = (acc[row.roleId] || 0) + 1;
     return acc;
@@ -349,25 +441,42 @@ function buildAppData(db, iconRegistry) {
   const initialTasks = db.forecastTasks.map((task) => {
     const cycle = cyclesById[task.forecastCycleId];
     const channel = channelsById[task.channelId];
-    const file = db.forecastFiles.find((item) => item.forecastTaskId === task.id);
+    const activeAssignments = (db.taskAssignments || [])
+      .filter((item) => item.forecastTaskId === task.id && item.status === "active");
+    const firstAsm = activeAssignments[0];
+    const file = db.forecastFiles
+      .filter((item) => item.forecastTaskId === task.id)
+      .sort((a, b) => (b.version || 0) - (a.version || 0))[0];
+    const approvalRequest = approvalRequestsById[task.currentApprovalRequestId];
+    const statusCode = normalizeTaskStatusLabel(task.status);
     return {
       id: task.id,
       forecastId: task.forecastCycleId,
       title: `Forecast ${channel.shortName} - ${formatMonth(cycle.month, cycle.year)}`,
       channel: channel.shortName,
       region: channel.region,
-      owner: getUserName(usersById, task.ownerId),
-      ownerRole: getUserTitle(usersById, task.ownerId),
+      ownerId: firstAsm?.userId || task.ownerId,
+      owner: getUserName(usersById, firstAsm?.userId || task.ownerId),
+      ownerRole: getUserTitle(usersById, firstAsm?.userId || task.ownerId),
+      asmUserIds: activeAssignments.map((item) => item.userId),
       rsm: getUserName(usersById, task.rsmId),
       director: getUserName(usersById, task.directorId),
       deadline: formatDate(task.deadlineAt),
       due: task.dueText,
       progress: task.progress,
-      status: task.status,
-      statusTone: task.statusTone,
+      statusCode,
+      status: taskStatusLabels[statusCode] || task.status,
+      statusTone: task.statusTone || taskStatusTones[statusCode] || "neutral",
+      currentApprovalRequestId: task.currentApprovalRequestId,
+      currentFileVersion: task.currentFileVersion,
+      approvalStatus: approvalRequest?.status || "",
+      approvalUrl: approvalRequest?.externalApprovalUrl || "",
       marker: channel.marker,
+      fileId: file?.id || "",
       file: file?.fileName || "",
       fileSize: file?.fileSize || "",
+      fileVersion: file?.version || "",
+      fileStatus: file?.status || "",
       icon: getIcon(iconRegistry, channel.iconKey),
       iconTone: channel.iconTone,
       template: cycle.template,
