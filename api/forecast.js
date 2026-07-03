@@ -2,7 +2,7 @@ import { withTransaction } from "../server/lib/db.js";
 import { getBearerToken, readJsonBody, sendJson, sendMethodNotAllowed } from "../server/lib/http.js";
 import { requireModulePermission } from "../server/lib/auth.js";
 import { assignTaskAsms } from "../server/lib/forecastService.js";
-import { createUploadIntent, getFileDownloadIntent, saveFileMetadata } from "../server/lib/fileService.js";
+import { createUploadIntent, deleteDraftFileMetadata, getFileDownloadIntent, saveFileMetadata } from "../server/lib/fileService.js";
 import { submitTaskForApproval, syncApprovalRequest, syncPendingApprovalRequests } from "../server/lib/approvalService.js";
 
 function getQuery(req) {
@@ -73,6 +73,20 @@ async function handleSaveFile(req, res) {
   return sendJson(res, 200, { ok: true, file });
 }
 
+async function handleDeleteFile(req, res) {
+  if (req.method !== "POST") return sendMethodNotAllowed(res, ["POST"]);
+  const guard = await guardModule(req, res, "forecast_submit");
+  if (!guard) return;
+  const body = await readJsonBody(req);
+  const file = await withTransaction((client) =>
+    deleteDraftFileMetadata(client, {
+      fileId: body.fileId,
+      actorId: guard.auth?.user?.id || null,
+    })
+  );
+  return sendJson(res, 200, { ok: true, file });
+}
+
 async function handleSubmitTask(req, res) {
   if (req.method !== "POST") return sendMethodNotAllowed(res, ["POST"]);
   const guard = await guardModule(req, res, "forecast_submit");
@@ -119,6 +133,7 @@ export default async function handler(req, res) {
     if (route === "assign-task") return handleAssignTask(req, res);
     if (route === "create-upload-intent") return handleCreateUploadIntent(req, res);
     if (route === "save-file") return handleSaveFile(req, res);
+    if (route === "delete-file") return handleDeleteFile(req, res);
     if (route === "submit-task") return handleSubmitTask(req, res);
     if (route === "sync-approval") return handleSyncApproval(req, res);
     if (route === "download-intent") return handleDownloadIntent(req, res);
@@ -126,7 +141,7 @@ export default async function handler(req, res) {
     return sendJson(res, 404, {
       ok: false,
       error: "forecast_route_not_found",
-      routes: ["assign-task", "create-upload-intent", "save-file", "submit-task", "sync-approval", "download-intent"],
+      routes: ["assign-task", "create-upload-intent", "save-file", "delete-file", "submit-task", "sync-approval", "download-intent"],
     });
   } catch (error) {
     return sendJson(res, error.statusCode || 500, {

@@ -56,6 +56,13 @@ export async function saveForecastFileMetadata(payload) {
   });
 }
 
+export async function deleteForecastFileMetadata(fileId) {
+  return requestJson("/api/forecast?route=delete-file", {
+    method: "POST",
+    body: JSON.stringify({ fileId }),
+  });
+}
+
 export async function submitForecastTask(taskId, fileIds = []) {
   return requestJson("/api/forecast?route=submit-task", {
     method: "POST",

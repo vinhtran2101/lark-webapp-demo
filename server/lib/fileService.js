@@ -232,6 +232,78 @@ export async function saveFileMetadata(client, {
   return result.rows[0];
 }
 
+export async function deleteDraftFileMetadata(client, { fileId, actorId = null }) {
+  const result = await client.query(
+    `
+      select ff.*, ft.id as task_id, ft.current_file_version, sc.name as channel_name
+      from forecast_files ff
+      join forecast_tasks ft on ft.id = ff.forecast_task_id
+      left join sales_channels sc on sc.id = ff.channel_id
+      where ff.id::text = $1
+      limit 1
+    `,
+    [fileId]
+  );
+  const file = result.rows[0];
+  if (!file) {
+    const error = new Error("Khong tim thay file Forecast.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (file.status !== "draft") {
+    const error = new Error("Chi duoc xoa file nhap. File da submit/duyet can giu lai de doi soat lich su.");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  await client.query("delete from forecast_files where id = $1", [file.id]);
+
+  const latest = await client.query(
+    "select max(version)::int as version from forecast_files where forecast_task_id = $1",
+    [file.forecast_task_id]
+  );
+  const nextVersion = latest.rows[0]?.version || null;
+
+  await client.query(
+    `
+      update forecast_tasks
+      set current_file_version = $2,
+          due_text = case when $2 is null then 'Cho ASM cap nhat file' else due_text end,
+          progress = case when $2 is null then least(progress, 30) else progress end,
+          updated_at = now()
+      where id = $1
+    `,
+    [file.forecast_task_id, nextVersion]
+  );
+
+  await client.query(
+    `
+      insert into activity_logs (actor_id, entity_type, entity_id, action, message, metadata)
+      values ($1, 'forecast_task', $2, 'file_metadata_deleted', $3, $4::jsonb)
+    `,
+    [
+      actorId || file.uploaded_by || file.asm_user_id,
+      file.forecast_task_id,
+      `${file.channel_name || "Task Forecast"} da xoa file nhap`,
+      JSON.stringify({
+        detail: `${file.file_name} v${file.version}`,
+        tone: "red",
+        iconKey: "trash",
+        createdAtLabel: "Vua xong",
+      }),
+    ]
+  );
+
+  return {
+    id: file.id,
+    taskId: file.forecast_task_id,
+    fileName: file.file_name,
+    version: file.version,
+    nextFileVersion: nextVersion,
+  };
+}
+
 export async function getFileDownloadIntent(fileId) {
   const result = await query("select * from forecast_files where id::text = $1 limit 1", [fileId]);
   const file = result.rows[0];

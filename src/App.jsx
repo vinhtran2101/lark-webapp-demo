@@ -56,6 +56,7 @@ import { buildAppDataFromBootstrap, buildMockAppData } from "./data/mockViewMode
 import {
   assignForecastTask,
   createForecastUploadIntent,
+  deleteForecastFileMetadata,
   fetchAuthState,
   fetchBootstrapData,
   requestJson,
@@ -873,6 +874,33 @@ function App() {
     }
   };
 
+  const handleDeleteTaskFile = async (taskId, fileId) => {
+    const task = tasks.find((item) => item.id === taskId);
+    if (!fileId) return;
+
+    try {
+      await deleteForecastFileMetadata(fileId);
+      await loadDatabaseData();
+      addEvent({
+        icon: Trash2,
+        tone: "red",
+        title: `Da xoa file ${task?.channel || "Forecast"}`,
+        body: "File nhap da duoc go khoi task.",
+      });
+      showToast("Da xoa file nhap khoi task.");
+      return true;
+    } catch (error) {
+      showToast(error.message || "Khong the xoa file.");
+      addEvent({
+        icon: AlertTriangle,
+        tone: "red",
+        title: `Chua the xoa file ${task?.channel || "Forecast"}`,
+        body: error.message || "File da submit/duyet can duoc giu lai de doi soat.",
+      });
+      return false;
+    }
+  };
+
   const handleAssignTask = async (taskId, user) => {
     const task = tasks.find((item) => item.id === taskId);
     if (!task || !user) return;
@@ -1171,6 +1199,7 @@ function App() {
               forecast={forecasts.find((forecast) => forecast.id === selectedTask?.forecastId)}
               onBack={() => setScreen("tasks")}
               onSubmit={handleTaskSubmit}
+              onDeleteFile={handleDeleteTaskFile}
             />
           )}
           {screen === "appraisal" && (
@@ -1886,7 +1915,7 @@ function TaskMetric({ title, value, note, delta, progress, tone }) {
   );
 }
 
-function TaskUpdate({ onBack, task, forecast, onSubmit }) {
+function TaskUpdate({ onBack, task, forecast, onSubmit, onDeleteFile }) {
   const displayTask = task || initialTasks[0];
   const [taskStatus, setTaskStatus] = useState("doing");
   const [fileName, setFileName] = useState(
@@ -1901,6 +1930,24 @@ function TaskUpdate({ onBack, task, forecast, onSubmit }) {
     if (!file) return;
     setSelectedFile(file);
     setFileName(file.name);
+  };
+
+  const handleRemoveFile = async () => {
+    if (selectedFile) {
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      setFileName(displayTask.file || `Forecast_${displayTask.channel.replace(/\s+/g, "_")}_${forecast?.monthShort || "T07_2026"}.xlsx`);
+      return;
+    }
+
+    if (displayTask.fileId && onDeleteFile) {
+      const deleted = await onDeleteFile(displayTask.id, displayTask.fileId);
+      if (deleted) {
+        setFileName(`Forecast_${displayTask.channel.replace(/\s+/g, "_")}_${forecast?.monthShort || "T07_2026"}.xlsx`);
+      }
+    }
   };
 
   return (
@@ -1980,7 +2027,7 @@ function TaskUpdate({ onBack, task, forecast, onSubmit }) {
               </small>
             </div>
             <CheckCircle2 size={22} />
-            <button className="icon-button table-action" title="Xóa">
+            <button className="icon-button table-action" type="button" title="Xóa" onClick={handleRemoveFile}>
               <Trash2 size={19} />
             </button>
           </div>
